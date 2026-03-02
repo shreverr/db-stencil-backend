@@ -1,7 +1,10 @@
 import { Hono } from 'hono'
 import { env } from './config/env'
+import routes from './routes'
 
 const app = new Hono()
+
+app.route('/api/v1', routes)
 
 app.get('/health', (c) => {
   return c.json({

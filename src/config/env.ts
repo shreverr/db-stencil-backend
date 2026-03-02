@@ -3,7 +3,7 @@ import { z } from 'zod'
 const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   DB_URI: z.string().nonempty(),
-  SUPABASE_URL: z.string().url(),
+  SUPABASE_URL: z.string().nonempty(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().nonempty(),
 })
 
