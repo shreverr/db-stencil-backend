@@ -13,5 +13,4 @@ authRoutes.get("/protected", supabaseAuth, (c) => {
   })
 })
 
-
 export default authRoutes 

@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { env } from './config/env'
 import routes from './routes'
+import { connectDB } from './config/database'
 
 const app = new Hono()
+connectDB()
 
 app.route('/api/v1', routes)
 
