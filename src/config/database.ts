@@ -1,10 +1,10 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import { env } from './env';
 import postgres from 'postgres';
 
-export const connectDB = async () => {
-  const client = postgres(env.DB_URI, { prepare: false })
-  const db = drizzle(client);
+const client = postgres(env.DB_URI, { prepare: false });
+export const db = drizzle(client);
 
+export const connectDB = () => {
   console.log("database connected");
-}
+};

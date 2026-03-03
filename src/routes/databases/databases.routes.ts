@@ -1,12 +1,21 @@
 import { Hono } from 'hono'
 import { supabaseAuth } from '../../middleware/middleware'
+import {
+  listDatabases,
+  getDatabase,
+  createDatabase,
+  updateDatabase,
+  deleteDatabase,
+} from '../../controllers/databases.controller'
 
 const databaseRoutes = new Hono()
 
-databaseRoutes.get("/", supabaseAuth)
-databaseRoutes.get("/:id", supabaseAuth)
-databaseRoutes.post("/", supabaseAuth)
-databaseRoutes.put("/:id", supabaseAuth)
-databaseRoutes.delete("/:id", supabaseAuth)
+databaseRoutes.use('/*', supabaseAuth)
 
-export default databaseRoutes 
+databaseRoutes.get('/', listDatabases)
+databaseRoutes.get('/:id', getDatabase)
+databaseRoutes.post('/', createDatabase)
+databaseRoutes.patch('/:id', updateDatabase)
+databaseRoutes.delete('/:id', deleteDatabase)
+
+export default databaseRoutes
