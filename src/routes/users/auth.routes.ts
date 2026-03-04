@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { supabaseAuth } from '../../middleware/middleware'
+import type { AppEnv } from '../../types/app'
 
-const authRoutes = new Hono()
+const authRoutes = new Hono<AppEnv>()
 
 authRoutes.get("/protected", supabaseAuth, (c) => {
   const user = c.get("user")
@@ -13,4 +14,4 @@ authRoutes.get("/protected", supabaseAuth, (c) => {
   })
 })
 
-export default authRoutes 
+export default authRoutes

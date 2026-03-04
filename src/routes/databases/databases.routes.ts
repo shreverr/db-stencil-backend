@@ -7,8 +7,9 @@ import {
   updateDatabase,
   deleteDatabase,
 } from '../../controllers/databases.controller'
+import type { AppEnv } from '../../types/app'
 
-const databaseRoutes = new Hono()
+const databaseRoutes = new Hono<AppEnv>()
 
 databaseRoutes.use('/*', supabaseAuth)
 

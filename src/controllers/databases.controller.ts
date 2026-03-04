@@ -3,20 +3,28 @@ import { z } from 'zod'
 import { eq, and } from 'drizzle-orm'
 import { db } from '../config/database'
 import { databases } from '../db/schema/databases.schema'
+import type { AppEnv } from '../types/app'
 
 const createSchema = z.object({
   databaseName: z.string().min(1, 'databaseName is required'),
   databaseType: z.enum(['postgres']),
+  color: z.string().optional(),
 })
 
-const updateSchema = createSchema.partial().refine(
+const updateSchema = z.object({
+  databaseName: z.string().min(1).optional(),
+  databaseType: z.enum(['postgres']).optional(),
+  color: z.string().optional(),
+  starred: z.boolean().optional(),
+  status: z.enum(['active', 'draft', 'trashed']).optional(),
+}).refine(
   (data) => Object.keys(data).length > 0,
   { message: 'At least one field must be provided' }
 )
 
 const uuidSchema = z.string().uuid('Invalid id format')
 
-export async function listDatabases(c: Context) {
+export async function listDatabases(c: Context<AppEnv>) {
   try {
     const userId = c.get('user').sub as string
 
@@ -32,7 +40,7 @@ export async function listDatabases(c: Context) {
   }
 }
 
-export async function getDatabase(c: Context) {
+export async function getDatabase(c: Context<AppEnv>) {
   try {
     const userId = c.get('user').sub as string
     const idParam = c.req.param('id')
@@ -59,7 +67,7 @@ export async function getDatabase(c: Context) {
   }
 }
 
-export async function createDatabase(c: Context) {
+export async function createDatabase(c: Context<AppEnv>) {
   try {
     const userId = c.get('user').sub as string
 
@@ -72,7 +80,7 @@ export async function createDatabase(c: Context) {
 
     const parsed = createSchema.safeParse(body)
     if (!parsed.success) {
-      return c.json({ error: 'Validation failed', details: parsed.error}, 400)
+      return c.json({ error: 'Validation failed', details: parsed.error.flatten()}, 400)
     }
 
     const result = await db
@@ -82,6 +90,7 @@ export async function createDatabase(c: Context) {
         userid: userId,
         databaseName: parsed.data.databaseName,
         databaseType: parsed.data.databaseType,
+        color: parsed.data.color ?? '#3b82f6',
       })
       .returning()
 
@@ -92,7 +101,7 @@ export async function createDatabase(c: Context) {
   }
 }
 
-export async function updateDatabase(c: Context) {
+export async function updateDatabase(c: Context<AppEnv>) {
   try {
     const userId = c.get('user').sub as string
     const idParam = c.req.param('id')
@@ -137,7 +146,7 @@ export async function updateDatabase(c: Context) {
   }
 }
 
-export async function deleteDatabase(c: Context) {
+export async function deleteDatabase(c: Context<AppEnv>) {
   try {
     const userId = c.get('user').sub as string
     const idParam = c.req.param('id')
