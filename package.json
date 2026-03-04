@@ -4,6 +4,7 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@dbml/core": "^6.4.0",
     "@supabase/supabase-js": "^2.98.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",

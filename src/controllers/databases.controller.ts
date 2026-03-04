@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { eq, and } from 'drizzle-orm'
 import { db } from '../config/database'
 import { databases } from '../db/schema/databases.schema'
+import { schemas } from '../db/schema/schemas.schema'
 
 const createSchema = z.object({
   databaseName: z.string().min(1, 'databaseName is required'),
@@ -84,6 +85,14 @@ export async function createDatabase(c: Context) {
         databaseType: parsed.data.databaseType,
       })
       .returning()
+
+    const resultSchema = await db
+          .insert(schemas)
+          .values({
+            id: crypto.randomUUID(),
+            databaseid: result[0].id,
+            dbmlJson: {},
+          })
 
     return c.json(result[0], 201)
   } catch (err) {
