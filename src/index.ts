@@ -8,12 +8,8 @@ import { cors } from 'hono/cors'
 const app = new Hono()
 connectDB()
 
+app.use('/api/v1/*', cors())
 app.route('/api/v1', routes)
-app.use('/api/v1/*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-}))
 
 app.get('/health', (c) => {
   return c.json({

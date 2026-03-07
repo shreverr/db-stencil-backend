@@ -6,11 +6,15 @@ export const schemas = p.pgTable("schemas", {
   id: p.uuid().primaryKey(),
   createdAt: p.timestamp().notNull().defaultNow(),
   updatedAt: p.timestamp().notNull().defaultNow(),
-  databaseid: p.uuid().notNull(),
+
+  databaseid: p.uuid()
+    .notNull()
+    .references(() => databases.id, { onDelete: "cascade" }),
+
   dbmlJson: p.json().notNull(),
 });
 
-export const databasesRelations = relations(schemas, ({ one }) => ({
+export const schemasRelations = relations(schemas, ({ one }) => ({
   database: one(databases, {
     fields: [schemas.databaseid],
     references: [databases.id],

@@ -9,4 +9,5 @@ export const databases = p.pgTable("databases", {
   userid: p.uuid().notNull(),
   databaseName: p.text().notNull(),
   databaseType: databaseType("databaseType").notNull(),
+  color: p.text().notNull(),
 });
