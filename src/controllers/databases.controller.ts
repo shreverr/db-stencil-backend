@@ -9,6 +9,7 @@ const createSchema = z.object({
   databaseName: z.string().min(1, 'databaseName is required'),
   databaseType: z.enum(['postgres']),
   color: z.string().min(1, 'color is required'),
+  starred: z.boolean().optional(),
 })
 
 const updateSchema = createSchema.partial().refine(
@@ -85,6 +86,7 @@ export async function createDatabase(c: Context) {
         databaseName: parsed.data.databaseName,
         databaseType: parsed.data.databaseType,
         color: parsed.data.color,
+        starred: parsed.data.starred,
       })
       .returning()
 

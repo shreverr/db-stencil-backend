@@ -10,4 +10,5 @@ export const databases = p.pgTable("databases", {
   databaseName: p.text().notNull(),
   databaseType: databaseType("databaseType").notNull(),
   color: p.text().notNull(),
+  starred: p.boolean().notNull().default(false),
 });

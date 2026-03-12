@@ -1,7 +1,9 @@
 {
   "name": "dbstencil-backend",
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "bun run --hot src/index.ts",
+    "build": "bun run build src/index.ts --outdir dist",
+    "start": "bun run dist/index.js"
   },
   "dependencies": {
     "@dbml/core": "^6.4.0",
