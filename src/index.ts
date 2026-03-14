@@ -8,7 +8,7 @@ import { cors } from 'hono/cors'
 const app = new Hono()
 connectDB()
 
-const FIVE_MIN = 5 * 60 * 1000
+const FIVE_MIN = 30 * 1000
 const pingTarget = async () => {
   try {
     const res = await fetch(env.CURL_TO)
