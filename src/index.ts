@@ -8,6 +8,18 @@ import { cors } from 'hono/cors'
 const app = new Hono()
 connectDB()
 
+const FIVE_MIN = 5 * 60 * 1000
+const pingTarget = async () => {
+  try {
+    const res = await fetch(env.CURL_TO)
+    console.log(`[ping] ${env.CURL_TO} → ${res.status}`)
+  } catch (err) {
+    console.error(`[ping] failed to fetch ${env.CURL_TO}:`, err)
+  }
+}
+pingTarget()
+setInterval(pingTarget, FIVE_MIN)
+
 app.use('/api/v1/*', cors())
 app.route('/api/v1', routes)
 

@@ -5,6 +5,7 @@ const envSchema = z.object({
   DB_URI: z.string().nonempty(),
   SUPABASE_URL: z.string().nonempty(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().nonempty(),
+  CURL_TO: z.string().nonempty(),
 })
 
 const parsed = envSchema.safeParse(process.env)
