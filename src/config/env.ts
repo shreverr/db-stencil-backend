@@ -6,6 +6,20 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().nonempty(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().nonempty(),
   CURL_TO: z.string().nonempty(),
+  FRONTEND_URL: z.string().nonempty().default('http://localhost:3000'),
+
+  // ── Dodo Payments ─────────────────────────────────────────────────────
+  DODO_API_KEY: z.string().optional(),
+  DODO_API_URL: z.string().default('https://test.dodopayments.com'),
+  DODO_WEBHOOK_SECRET: z.string().optional(),
+  // Product ids set in the Dodo dashboard, mirrored here so the checkout
+  // endpoint can map our internal variant ids → Dodo products.
+  DODO_PRODUCT_PRO_MONTHLY: z.string().optional(),
+  DODO_PRODUCT_PRO_ANNUAL: z.string().optional(),
+  DODO_PRODUCT_LIMITLESS: z.string().optional(),
+  DODO_PRODUCT_TOPUP_SMALL: z.string().optional(),
+  DODO_PRODUCT_TOPUP_MEDIUM: z.string().optional(),
+  DODO_PRODUCT_TOPUP_LARGE: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

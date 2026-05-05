@@ -1,9 +1,10 @@
 import { Context } from 'hono'
 import { z } from 'zod'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db } from '../config/database'
 import { schemas } from '../db/schema/schemas.schema'
 import { databases } from '../db/schema/databases.schema'
+import { userHasAccess } from '../lib/access'
 
 const updateBodySchema = z.object({
   dbmlJson: z.record(z.string(), z.unknown()),
@@ -21,11 +22,15 @@ export async function getSchema(c: Context) {
       return c.json({ error: 'Invalid id format' }, 400)
     }
 
+    if (!(await userHasAccess(dbIdParsed.data, userId, 'viewer'))) {
+      return c.json({ error: 'Not found' }, 404)
+    }
+
     const result = await db
-      .select({ schema: schemas, db: databases })
+      .select({ schema: schemas })
       .from(schemas)
       .innerJoin(databases, eq(schemas.databaseid, databases.id))
-      .where(and(eq(databases.id, dbIdParsed.data), eq(databases.userid, userId)))
+      .where(eq(databases.id, dbIdParsed.data))
       .limit(1)
 
     if (result.length === 0) {
@@ -61,11 +66,15 @@ export async function updateSchema(c: Context) {
       return c.json({ error: 'Validation failed', details: z.flattenError(parsed.error) }, 400)
     }
 
+    if (!(await userHasAccess(dbIdParsed.data, userId, 'editor'))) {
+      return c.json({ error: 'Not found' }, 404)
+    }
+
     const existing = await db
       .select({ schema: schemas })
       .from(schemas)
       .innerJoin(databases, eq(schemas.databaseid, databases.id))
-      .where(and(eq(databases.id, dbIdParsed.data), eq(databases.userid, userId)))
+      .where(eq(databases.id, dbIdParsed.data))
       .limit(1)
 
     if (existing.length === 0) {

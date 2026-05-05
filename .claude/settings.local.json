@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git stash && git pull && git stash pop)",
+      "Bash(git add src/index.ts && git stash drop)"
+    ]
+  }
+}
