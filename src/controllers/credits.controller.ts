@@ -6,7 +6,7 @@ import { userCredits, creditLedger } from '../db/schema/credits.schema'
 
 export const FREE_CREDITS = 1000
 /** Cost of one AI generation turn (one user message → assistant response). */
-export const COST_PER_AI_TURN = 300
+export const COST_PER_AI_TURN = 1
 
 /**
  * Lazy-init: every authenticated user gets `FREE_CREDITS` on first access.

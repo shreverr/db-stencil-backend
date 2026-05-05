@@ -12,6 +12,7 @@ import migrateRoutes from './databases/migrate.routes'
 import shareLinksRoutes from './share-links.routes'
 import invitesRoutes from './invites.routes'
 import publicRoutes from './public.routes'
+import aiRoutes from './ai.routes'
 
 const routes = new Hono()
 
@@ -28,5 +29,6 @@ routes.route('/databases', databaseRoutes)
 routes.route('/share-links', shareLinksRoutes)
 routes.route('/invites', invitesRoutes)
 routes.route('/public', publicRoutes)
+routes.route('/ai', aiRoutes)
 
 export default routes

@@ -20,6 +20,12 @@ const envSchema = z.object({
   DODO_PRODUCT_TOPUP_SMALL: z.string().optional(),
   DODO_PRODUCT_TOPUP_MEDIUM: z.string().optional(),
   DODO_PRODUCT_TOPUP_LARGE: z.string().optional(),
+
+  // ── AI (OpenAI or any OpenAI-compatible gateway) ──────────────────────
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().default('https://api.openai.com/v1'),
+  OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  OPENROUTER_REFERER: z.string().default('http://localhost:3000'),
 })
 
 const parsed = envSchema.safeParse(process.env)

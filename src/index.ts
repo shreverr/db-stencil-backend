@@ -34,4 +34,7 @@ app.get('/health', (c) => {
 export default {
   fetch: app.fetch,
   port: env.PORT,
+  // AI streaming turns can run for a minute+ across rounds. Bun's 10s default
+  // aborts mid-stream. 255 is the max Bun allows.
+  idleTimeout: 255,
 }
