@@ -1,18 +1,18 @@
 /**
- * One-shot: grant credits to a user looked up by email.
- *   bun run scripts/grant-credits.ts sudo.aditya@gmail.com 1000
+ * One-shot: grant AI messages to a user looked up by email.
+ *   bun run scripts/grant-messages.ts sudo.aditya@gmail.com 250
  */
 import 'dotenv/config'
 import { db } from '../src/config/database'
-import { userCredits, creditLedger } from '../src/db/schema/credits.schema'
+import { userMessages, messageLedger } from '../src/db/schema/messages.schema'
 import { sql } from 'drizzle-orm'
 import { env } from '../src/config/env'
 
 const email = (process.argv[2] ?? '').trim().toLowerCase()
-const amount = parseInt(process.argv[3] ?? '1000', 10)
+const amount = parseInt(process.argv[3] ?? '250', 10)
 
 if (!email || !email.includes('@') || !amount || amount <= 0) {
-  console.error('Usage: bun run scripts/grant-credits.ts <email> <amount>')
+  console.error('Usage: bun run scripts/grant-messages.ts <email> <amount>')
   process.exit(1)
 }
 
@@ -48,23 +48,27 @@ async function main() {
   }
   console.log(`Found user ${email} → ${userId}`)
 
-  // Upsert: create row at `amount`, or top up existing row to AT LEAST `amount`.
+  // Upsert: create row at `amount`, or top up existing row by `amount`.
   await db
-    .insert(userCredits)
-    .values({ userId, balance: amount })
+    .insert(userMessages)
+    .values({ userId, balance: amount, lifetimeGranted: amount })
     .onConflictDoUpdate({
-      target: userCredits.userId,
-      set: { balance: sql`GREATEST(${userCredits.balance}, ${amount})`, updatedAt: new Date() },
+      target: userMessages.userId,
+      set: {
+        balance: sql`${userMessages.balance} + ${amount}`,
+        lifetimeGranted: sql`${userMessages.lifetimeGranted} + ${amount}`,
+        updatedAt: new Date(),
+      },
     })
 
-  await db.insert(creditLedger).values({
+  await db.insert(messageLedger).values({
     userId,
     delta: amount,
     reason: 'manual_grant',
     meta: { email, by: 'script' },
   })
 
-  console.log(`Granted ${amount} credits to ${email}`)
+  console.log(`Granted ${amount} messages to ${email}`)
   process.exit(0)
 }
 

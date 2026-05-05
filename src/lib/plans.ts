@@ -1,16 +1,22 @@
 /**
  * Single source of truth for the 3 plans + topup packs.
  *
- * Plan grant amounts are credited on subscription create + each renewal
- * via the Dodo webhook handler.
+ * AI is metered in *messages* (1 message = 1 AI turn). Free is a lifetime
+ * cap with no reset. Pro grants +N messages on each successful renewal
+ * (balance rolls over). Enterprise is sales-led with no automated billing.
  */
 
-export type PlanId = 'free' | 'pro' | 'limitless'
-export type Cycle = 'monthly' | 'annual' | 'lifetime'
+export type PlanId = 'free' | 'pro' | 'enterprise'
+export type Cycle = 'monthly' | 'annual'
 
 export interface PlanFeatures {
-  /** AI credits granted per billing period (monthly for pro, lifetime for limitless). */
-  aiCreditsPerPeriod: number
+  /**
+   * Messages granted per billing period. For `free` this is the lifetime cap
+   * granted once on signup. For `pro` it's added on each renewal (additive,
+   * unused balance rolls over). For `enterprise` resolved at deal time —
+   * default 0 here so feature-gating defers to manual provisioning.
+   */
+  messagesPerPeriod: number
   /** Hard cap on number of active projects (`Infinity` for unlimited). */
   projectLimit: number
   /** May invite editors (true) or only viewers (false). */
@@ -21,19 +27,19 @@ export interface PlanFeatures {
 
 export const PLAN_FEATURES: Record<PlanId, PlanFeatures> = {
   free: {
-    aiCreditsPerPeriod: 1_000,
+    messagesPerPeriod: 20,
     projectLimit: 3,
     editorCollab: false,
     publicLinks: true,
   },
   pro: {
-    aiCreditsPerPeriod: 100_000,
+    messagesPerPeriod: 250,
     projectLimit: Number.POSITIVE_INFINITY,
     editorCollab: true,
     publicLinks: true,
   },
-  limitless: {
-    aiCreditsPerPeriod: 1_000_000,
+  enterprise: {
+    messagesPerPeriod: 0,
     projectLimit: Number.POSITIVE_INFINITY,
     editorCollab: true,
     publicLinks: true,
@@ -47,37 +53,36 @@ export interface PlanPriceVariant {
   priceUsd: number
   /** Dodo product id — set in the dashboard, mirrored in env. */
   dodoProductIdEnvKey: string
+  /** Messages granted per renewal (also on initial activation). */
+  messagesPerPeriod: number
 }
 
 /**
- * Pricing variants for the 3 plans. Free has no price variants.
- * Pro is recurring (monthly / annual). Limitless is one-time (lifetime).
+ * Pricing variants. Only Pro has paid variants. Free is implicit; Enterprise
+ * is sales-led (no Dodo product).
+ *
+ * Annual = 12× monthly messages granted in one shot at activation/renewal,
+ * priced at 10× monthly so users save ~17% vs paying month-to-month.
  */
-export const PRICE_VARIANTS: Record<Exclude<PlanId, 'free'>, PlanPriceVariant[]> = {
+export const PRICE_VARIANTS: Record<'pro', PlanPriceVariant[]> = {
   pro: [
-    { id: 'pro_monthly', cycle: 'monthly', priceUsd: 1,  dodoProductIdEnvKey: 'DODO_PRODUCT_PRO_MONTHLY' },
-    { id: 'pro_annual',  cycle: 'annual',  priceUsd: 10, dodoProductIdEnvKey: 'DODO_PRODUCT_PRO_ANNUAL'  },
-  ],
-  limitless: [
-    { id: 'limitless_lifetime', cycle: 'lifetime', priceUsd: 49, dodoProductIdEnvKey: 'DODO_PRODUCT_LIMITLESS' },
+    { id: 'pro_monthly', cycle: 'monthly', priceUsd: 1,  dodoProductIdEnvKey: 'DODO_PRODUCT_PRO_MONTHLY', messagesPerPeriod: 250  },
+    { id: 'pro_annual',  cycle: 'annual',  priceUsd: 10, dodoProductIdEnvKey: 'DODO_PRODUCT_PRO_ANNUAL',  messagesPerPeriod: 3000 },
   ],
 }
 
 /**
- * One-shot AI credit topup packs for users who blow through their monthly budget.
- * All cycles are 'lifetime' (one-time payment, credits never expire).
+ * One-shot message topup packs. Carry forever (no expiry).
  */
 export interface TopupPack {
   id: string
-  credits: number
+  messages: number
   priceUsd: number
   dodoProductIdEnvKey: string
 }
 
 export const TOPUP_PACKS: TopupPack[] = [
-  { id: 'topup_small',  credits: 50_000,  priceUsd: 5,  dodoProductIdEnvKey: 'DODO_PRODUCT_TOPUP_SMALL'  },
-  { id: 'topup_medium', credits: 200_000, priceUsd: 15, dodoProductIdEnvKey: 'DODO_PRODUCT_TOPUP_MEDIUM' },
-  { id: 'topup_large',  credits: 500_000, priceUsd: 30, dodoProductIdEnvKey: 'DODO_PRODUCT_TOPUP_LARGE'  },
+  { id: 'topup_200', messages: 200, priceUsd: 1, dodoProductIdEnvKey: 'DODO_PRODUCT_TOPUP_200' },
 ]
 
 /** Lookup helpers used elsewhere. */
@@ -90,7 +95,7 @@ export function findPriceVariant(variantId: string): PlanPriceVariant | undefine
 }
 
 export function planIdForVariant(variantId: string): PlanId | null {
-  for (const [plan, variants] of Object.entries(PRICE_VARIANTS) as [Exclude<PlanId, 'free'>, PlanPriceVariant[]][]) {
+  for (const [plan, variants] of Object.entries(PRICE_VARIANTS) as ['pro', PlanPriceVariant[]][]) {
     if (variants.some((v) => v.id === variantId)) return plan
   }
   return null
