@@ -3,7 +3,7 @@ import { stream } from 'hono/streaming'
 import { env } from '../config/env'
 import { buildGraph, createContext, type ChatBody } from '../lib/ai/graph'
 import { createSseWriter } from '../lib/ai/sse-writer'
-import { COST_PER_AI_TURN, deductCredits, ensureCreditsRow, grantCredits } from './credits.controller'
+import { COST_PER_AI_TURN, deductMessages, ensureMessagesRow, grantMessages } from './messages.controller'
 
 /**
  * POST /api/v1/ai/chat
@@ -19,13 +19,13 @@ export async function chatStream(c: Context) {
 
   const userId = c.get('user').sub as string
 
-  const ok = await deductCredits(userId, COST_PER_AI_TURN, 'ai_chat')
+  const ok = await deductMessages(userId, COST_PER_AI_TURN, 'ai_chat')
   if (ok === null) {
-    const row = await ensureCreditsRow(userId)
+    const row = await ensureMessagesRow(userId)
     return c.json(
       {
-        error: 'insufficient_credits',
-        message: "You're out of AI credits. Top up to keep generating.",
+        error: 'insufficient_messages',
+        message: "You're out of AI messages. Top up to keep generating.",
         balance: row.balance,
         required: COST_PER_AI_TURN,
       },
@@ -63,7 +63,7 @@ export async function chatStream(c: Context) {
       refundIfNeeded: async () => {
         if (ctx.nonClarifyToolCalls > 0) return
         try {
-          const newBal = await grantCredits(userId, COST_PER_AI_TURN, 'refund:ai_chat_no_canvas')
+          const newBal = await grantMessages(userId, COST_PER_AI_TURN, 'refund:ai_chat_no_canvas')
           if (newBal !== null) await writer.write({ type: 'refunded', amount: COST_PER_AI_TURN })
         } catch (e) {
           console.error('[ai/chat] refund failed:', (e as Error).message)

@@ -16,10 +16,17 @@ const envSchema = z.object({
   // endpoint can map our internal variant ids → Dodo products.
   DODO_PRODUCT_PRO_MONTHLY: z.string().optional(),
   DODO_PRODUCT_PRO_ANNUAL: z.string().optional(),
-  DODO_PRODUCT_LIMITLESS: z.string().optional(),
-  DODO_PRODUCT_TOPUP_SMALL: z.string().optional(),
-  DODO_PRODUCT_TOPUP_MEDIUM: z.string().optional(),
-  DODO_PRODUCT_TOPUP_LARGE: z.string().optional(),
+  DODO_PRODUCT_TOPUP_200: z.string().optional(),
+
+  // ── Enterprise leads ──────────────────────────────────────────────────
+  ENTERPRISE_LEADS_EMAIL: z.string().email().default('sudo.aditya@gmail.com'),
+  // Optional SMTP config for lead-notification emails. If unset we still
+  // store the lead in the DB; just no outbound email.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 
   // ── AI (OpenAI or any OpenAI-compatible gateway) ──────────────────────
   OPENAI_API_KEY: z.string().optional(),

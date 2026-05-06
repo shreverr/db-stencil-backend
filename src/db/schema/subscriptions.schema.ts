@@ -1,7 +1,7 @@
 import * as p from 'drizzle-orm/pg-core'
 
-export const planEnum = p.pgEnum('plan', ['free', 'pro', 'limitless'])
-export const cycleEnum = p.pgEnum('billing_cycle', ['monthly', 'annual', 'lifetime'])
+export const planEnum = p.pgEnum('plan', ['free', 'pro', 'enterprise'])
+export const cycleEnum = p.pgEnum('billing_cycle', ['monthly', 'annual'])
 export const subStatusEnum = p.pgEnum('subscription_status', [
   'active',
   'canceled',
@@ -12,8 +12,8 @@ export const subStatusEnum = p.pgEnum('subscription_status', [
 
 /**
  * One row per user. Lazy-init: a user with no row is implicitly on the free
- * plan. Limitless is one-time (no period_end). Pro carries a current_period_end
- * which Dodo's webhook bumps on each renewal.
+ * plan. Pro carries a current_period_end which Dodo's webhook bumps on each
+ * renewal. Enterprise is provisioned manually (sales-led) — no Dodo IDs.
  */
 export const subscriptions = p.pgTable('subscriptions', {
   userId: p.uuid('user_id').primaryKey(),
@@ -22,8 +22,6 @@ export const subscriptions = p.pgTable('subscriptions', {
   cycle: cycleEnum('cycle'),
   dodoCustomerId: p.text('dodo_customer_id'),
   dodoSubscriptionId: p.text('dodo_subscription_id'),
-  // For lifetime purchases — track which payment closed the deal.
-  dodoPaymentId: p.text('dodo_payment_id'),
   currentPeriodEnd: p.timestamp('current_period_end', { withTimezone: true }),
   cancelAtPeriodEnd: p.boolean('cancel_at_period_end').notNull().default(false),
   createdAt: p.timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -4,7 +4,7 @@
  * We avoid the SDK so we control timeout / error shape, and so the
  * dependency surface stays small. Endpoints used:
  *   - POST /subscriptions   — recurring (Pro)
- *   - POST /payments        — one-time (Limitless, topup)
+ *   - POST /payments        — one-time (topup packs)
  *
  * Webhook verification: HMAC-SHA256 of the raw request body using
  * `DODO_WEBHOOK_SECRET`, compared in constant time against the
@@ -22,7 +22,21 @@ interface DodoCheckoutResponse {
 
 interface CustomerInfo {
   email: string
-  name?: string
+  name: string
+}
+
+/**
+ * Dodo's CustomerRequest is an untagged enum: either an existing-customer
+ * reference (`{ customer_id }`) or a new-customer create (`{ email, name,
+ * create_new_customer: true }`). We always create — Dodo dedupes by email
+ * server-side so resubscribes still hit the same customer record.
+ */
+function customerPayload(c: CustomerInfo) {
+  return {
+    email: c.email,
+    name: c.name,
+    create_new_customer: true,
+  }
 }
 
 interface BillingAddress {
@@ -65,7 +79,7 @@ export async function createSubscriptionCheckout(args: {
       product_id: args.productId,
       quantity: 1,
       payment_link: true,
-      customer: args.customer,
+      customer: customerPayload(args.customer),
       billing: DEFAULT_BILLING,
       metadata: args.metadata,
       return_url: args.returnUrl,
@@ -79,7 +93,7 @@ export async function createSubscriptionCheckout(args: {
 }
 
 /**
- * Open a one-time-payment checkout (Limitless plan, topup packs).
+ * Open a one-time-payment checkout (topup packs).
  */
 export async function createPaymentCheckout(args: {
   productId: string
@@ -93,7 +107,7 @@ export async function createPaymentCheckout(args: {
     body: JSON.stringify({
       product_cart: [{ product_id: args.productId, quantity: 1 }],
       payment_link: true,
-      customer: args.customer,
+      customer: customerPayload(args.customer),
       billing: DEFAULT_BILLING,
       metadata: args.metadata,
       return_url: args.returnUrl,
@@ -107,18 +121,58 @@ export async function createPaymentCheckout(args: {
 }
 
 /**
- * Verify webhook signature. Dodo signs the raw body with HMAC-SHA256
- * using the configured webhook secret. We compare in constant time.
+ * Verify a Dodo webhook (Svix-format) signature.
+ *
+ * Svix scheme:
+ *   - secret: stored as `whsec_<base64>`; the part after the prefix is the
+ *     base64-encoded HMAC key.
+ *   - signed payload string: `${webhook-id}.${webhook-timestamp}.${body}`
+ *   - signature header: `webhook-signature: v1,<base64> [v1,<base64>...]`
+ *     (multiple sigs allowed during key rotation; any valid one passes).
+ *   - replay protection: reject if `webhook-timestamp` is older than 5 min.
+ *
+ * Returns `{ ok: true }` on success, or `{ ok: false, reason }` on failure.
  */
-export function verifyWebhookSignature(rawBody: string, signature: string | undefined): boolean {
-  if (!env.DODO_WEBHOOK_SECRET || !signature) return false
-  const expected = crypto.createHmac('sha256', env.DODO_WEBHOOK_SECRET).update(rawBody).digest('hex')
-  // Header may be `sha256=<hex>` or `<hex>` depending on dashboard config.
-  const provided = signature.startsWith('sha256=') ? signature.slice(7) : signature
-  if (expected.length !== provided.length) return false
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'))
-  } catch {
-    return false
+export function verifyWebhookSignature(args: {
+  body: string
+  msgId?: string
+  timestamp?: string
+  signatureHeader?: string
+}): { ok: true } | { ok: false; reason: string } {
+  if (!env.DODO_WEBHOOK_SECRET) return { ok: false, reason: 'no_secret_configured' }
+  const { body, msgId, timestamp, signatureHeader } = args
+  if (!msgId || !timestamp || !signatureHeader) return { ok: false, reason: 'missing_headers' }
+
+  // Replay window: ±5 minutes around now.
+  const ts = parseInt(timestamp, 10)
+  if (!Number.isFinite(ts)) return { ok: false, reason: 'bad_timestamp' }
+  const skew = Math.abs(Date.now() / 1000 - ts)
+  if (skew > 300) return { ok: false, reason: 'timestamp_out_of_window' }
+
+  // Strip `whsec_` prefix and base64-decode to raw key bytes.
+  const rawSecret = env.DODO_WEBHOOK_SECRET.startsWith('whsec_')
+    ? env.DODO_WEBHOOK_SECRET.slice(6)
+    : env.DODO_WEBHOOK_SECRET
+  let keyBytes: Buffer
+  try { keyBytes = Buffer.from(rawSecret, 'base64') }
+  catch { return { ok: false, reason: 'bad_secret' } }
+
+  const expected = crypto
+    .createHmac('sha256', keyBytes)
+    .update(`${msgId}.${timestamp}.${body}`)
+    .digest()
+
+  // Header may carry several space-separated `v1,<sig>` pairs.
+  for (const part of signatureHeader.split(' ')) {
+    const [version, sig] = part.split(',')
+    if (version !== 'v1' || !sig) continue
+    let provided: Buffer
+    try { provided = Buffer.from(sig, 'base64') }
+    catch { continue }
+    if (provided.length !== expected.length) continue
+    try {
+      if (crypto.timingSafeEqual(provided, expected)) return { ok: true }
+    } catch { /* length mismatch */ }
   }
+  return { ok: false, reason: 'no_valid_signature' }
 }

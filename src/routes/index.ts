@@ -2,8 +2,9 @@ import { Hono } from 'hono'
 import authRoutes from './users/auth.routes'
 import onboardRoutes from './users/onboard.routes'
 import usersRoutes from './users/users.routes'
-import creditsRoutes from './credits.routes'
+import messagesRoutes from './messages.routes'
 import billingRoutes from './billing.routes'
+import enterpriseRoutes from './enterprise.routes'
 import webhooksRoutes from './webhooks.routes'
 import databaseRoutes from './databases/databases.routes'
 import schemasRoutes from './databases/schemas.routes'
@@ -19,8 +20,9 @@ const routes = new Hono()
 routes.route('/auth', authRoutes)
 routes.route('/onboard', onboardRoutes)
 routes.route('/users', usersRoutes)
-routes.route('/credits', creditsRoutes)
+routes.route('/messages', messagesRoutes)
 routes.route('/billing', billingRoutes)
+routes.route('/enterprise', enterpriseRoutes)
 routes.route('/webhooks', webhooksRoutes)
 routes.route('/databases/:id/schemas', schemasRoutes)
 routes.route('/databases/:id/collaborators', collaboratorsRoutes)

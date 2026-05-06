@@ -215,7 +215,7 @@ export async function createInvite(c: Context) {
       if (!features.editorCollab) {
         return c.json({
           error: 'editor_invite_requires_upgrade',
-          message: `Inviting editors requires a Pro or Limitless plan. You can still invite viewers or share a public link.`,
+          message: `Inviting editors requires a Pro or Enterprise plan. You can still invite viewers or share a public link.`,
           plan: features.plan,
         }, 402)
       }

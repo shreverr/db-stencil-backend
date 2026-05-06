@@ -1,9 +1,9 @@
 import { Context } from 'hono'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { db } from '../config/database'
 import { subscriptions, billingEvents } from '../db/schema/subscriptions.schema'
-import { userCredits } from '../db/schema/credits.schema'
+import { userMessages, messageLedger } from '../db/schema/messages.schema'
 import { ensureSubscription, getUserPlan } from '../lib/billing'
 import {
   PLAN_FEATURES,
@@ -12,31 +12,48 @@ import {
   findPriceVariant,
   findTopupPack,
   planIdForVariant,
+  type PlanFeatures,
 } from '../lib/plans'
-import { createPaymentCheckout, createSubscriptionCheckout, verifyWebhookSignature } from '../lib/dodo'
-import { grantCredits } from './credits.controller'
+
+/**
+ * `Number.POSITIVE_INFINITY` does not survive `JSON.stringify` — it becomes
+ * `null`. Translate Infinity → `null` (and let `null` keep meaning "no
+ * limit") so the wire shape is JSON-safe and the frontend can branch
+ * cleanly on `value === null` without the value being indistinguishable
+ * from a default-fallback.
+ */
+function wireFeatures(f: PlanFeatures) {
+  return {
+    messagesPerPeriod: f.messagesPerPeriod,
+    projectLimit: Number.isFinite(f.projectLimit) ? f.projectLimit : null,
+    editorCollab: f.editorCollab,
+    publicLinks: f.publicLinks,
+  }
+}
+import { createSubscriptionCheckout, createPaymentCheckout, verifyWebhookSignature } from '../lib/dodo'
+import { grantMessages } from './messages.controller'
 import { env } from '../config/env'
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
 /**
  * GET /api/v1/billing/me
- * Returns the user's current plan, plan features, and credit balance.
+ * Returns the user's current plan, plan features, and message balance.
  */
 export async function getMyBilling(c: Context) {
   try {
     const userId = c.get('user').sub as string
     const sub = await ensureSubscription(userId)
     const plan = await getUserPlan(userId)
-    const [credits] = await db.select().from(userCredits).where(eq(userCredits.userId, userId)).limit(1)
+    const [msgs] = await db.select().from(userMessages).where(eq(userMessages.userId, userId)).limit(1)
     return c.json({
       plan,
-      planFeatures: PLAN_FEATURES[plan],
+      planFeatures: wireFeatures(PLAN_FEATURES[plan]),
       status: sub.status,
       cycle: sub.cycle,
       currentPeriodEnd: sub.currentPeriodEnd,
       cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-      credits: credits?.balance ?? 0,
+      messages: msgs?.balance ?? 0,
     })
   } catch (err) {
     console.error('[getMyBilling]', err)
@@ -52,11 +69,11 @@ export async function getMyBilling(c: Context) {
 export async function getPlanCatalog(c: Context) {
   return c.json({
     plans: {
-      free: { features: PLAN_FEATURES.free },
-      pro: { features: PLAN_FEATURES.pro, variants: PRICE_VARIANTS.pro },
-      limitless: { features: PLAN_FEATURES.limitless, variants: PRICE_VARIANTS.limitless },
+      free: { features: wireFeatures(PLAN_FEATURES.free) },
+      pro: { features: wireFeatures(PLAN_FEATURES.pro), variants: PRICE_VARIANTS.pro },
+      enterprise: { features: wireFeatures(PLAN_FEATURES.enterprise) },
     },
-    topups: TOPUP_PACKS.map((p) => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd })),
+    topups: TOPUP_PACKS.map((p) => ({ id: p.id, messages: p.messages, priceUsd: p.priceUsd })),
   })
 }
 
@@ -74,7 +91,9 @@ const checkoutSchema = z.object({
 export async function startCheckout(c: Context) {
   try {
     const userId = c.get('user').sub as string
-    const email = (c.get('user').email as string | undefined) ?? ''
+    const user = c.get('user') as { email?: string; user_metadata?: { full_name?: string; name?: string } }
+    const email = user.email ?? ''
+    const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? email.split('@')[0] ?? 'Customer'
 
     let body: unknown
     try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON body' }, 400) }
@@ -99,11 +118,10 @@ export async function startCheckout(c: Context) {
       variant_id: variant.id,
       plan_id: planId ?? 'unknown',
       cycle: variant.cycle,
+      messages_per_period: String(variant.messagesPerPeriod),
     }
 
-    const result = variant.cycle === 'lifetime'
-      ? await createPaymentCheckout({ productId, customer: { email }, metadata, returnUrl })
-      : await createSubscriptionCheckout({ productId, customer: { email }, metadata, returnUrl })
+    const result = await createSubscriptionCheckout({ productId, customer: { email, name }, metadata, returnUrl })
 
     return c.json({ url: result.payment_link, paymentId: result.payment_id, subscriptionId: result.subscription_id })
   } catch (err) {
@@ -116,12 +134,14 @@ const topupSchema = z.object({ packId: z.string().min(1) })
 
 /**
  * POST /api/v1/billing/topup  body: { packId }
- * One-shot credit topup. Always uses one-time payment, regardless of plan.
+ * One-shot message topup. Always uses one-time payment, regardless of plan.
  */
 export async function startTopup(c: Context) {
   try {
     const userId = c.get('user').sub as string
-    const email = (c.get('user').email as string | undefined) ?? ''
+    const user = c.get('user') as { email?: string; user_metadata?: { full_name?: string; name?: string } }
+    const email = user.email ?? ''
+    const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? email.split('@')[0] ?? 'Customer'
 
     let body: unknown
     try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON body' }, 400) }
@@ -138,12 +158,12 @@ export async function startTopup(c: Context) {
 
     const result = await createPaymentCheckout({
       productId,
-      customer: { email },
+      customer: { email, name },
       metadata: {
         user_id: userId,
         kind: 'topup',
         pack_id: pack.id,
-        credits: String(pack.credits),
+        messages: String(pack.messages),
       },
       returnUrl: `${env.FRONTEND_URL}/billing/return?topup=${pack.id}`,
     })
@@ -185,12 +205,19 @@ interface DodoWebhookEvent {
  */
 export async function handleDodoWebhook(c: Context) {
   const raw = await c.req.text()
-  const sig = c.req.header('webhook-signature') ?? c.req.header('x-webhook-signature')
+  // Dodo wraps Svix — three headers carry the verification material.
+  const msgId = c.req.header('webhook-id')
+  const timestamp = c.req.header('webhook-timestamp')
+  const signatureHeader = c.req.header('webhook-signature')
 
   // In dev (no secret configured) we accept unverified events so local
   // testing isn't blocked. Production REQUIRES a configured secret.
-  if (env.DODO_WEBHOOK_SECRET && !verifyWebhookSignature(raw, sig)) {
-    return c.json({ error: 'Invalid signature' }, 401)
+  if (env.DODO_WEBHOOK_SECRET) {
+    const result = verifyWebhookSignature({ body: raw, msgId, timestamp, signatureHeader })
+    if (!result.ok) {
+      console.warn('[dodo-webhook] signature failed:', result.reason, 'msgId=', msgId)
+      return c.json({ error: 'Invalid signature', reason: result.reason }, 401)
+    }
   }
 
   let event: DodoWebhookEvent
@@ -223,18 +250,20 @@ export async function handleDodoWebhook(c: Context) {
         const subId = event.data?.subscription_id ?? event.subscription_id ?? null
         const customerId = event.data?.customer?.customer_id ?? null
         const periodEnd = event.data?.next_billing_date ?? event.data?.current_period_end ?? null
-        const variantId = meta.variant_id
-        const planId = meta.plan_id === 'pro' ? 'pro' : meta.plan_id === 'limitless' ? 'limitless' : null
-        if (!planId) break
+        if (meta.plan_id !== 'pro') break
 
-        const cycle = meta.cycle === 'annual' ? 'annual' : meta.cycle === 'monthly' ? 'monthly' : 'lifetime'
+        // Cycle comes from checkout metadata (set by startCheckout from the
+        // resolved variant). Fall back to monthly so legacy events from
+        // before annual launched still write a valid value.
+        const cycle: 'monthly' | 'annual' = meta.cycle === 'annual' ? 'annual' : 'monthly'
+
         await db
           .insert(subscriptions)
           .values({
             userId,
-            plan: planId,
+            plan: 'pro',
             status: 'active',
-            cycle: cycle as 'monthly' | 'annual' | 'lifetime',
+            cycle,
             dodoSubscriptionId: subId,
             dodoCustomerId: customerId,
             currentPeriodEnd: periodEnd ? new Date(periodEnd) : null,
@@ -244,9 +273,9 @@ export async function handleDodoWebhook(c: Context) {
           .onConflictDoUpdate({
             target: subscriptions.userId,
             set: {
-              plan: planId,
+              plan: 'pro',
               status: 'active',
-              cycle: cycle as 'monthly' | 'annual' | 'lifetime',
+              cycle,
               dodoSubscriptionId: subId,
               dodoCustomerId: customerId,
               currentPeriodEnd: periodEnd ? new Date(periodEnd) : null,
@@ -255,13 +284,30 @@ export async function handleDodoWebhook(c: Context) {
             },
           })
 
-        // Grant credits on first activation + each renewal.
+        // Grant messages on first activation + each renewal.
+        // Dodo fires `subscription.active` AND `subscription.renewed` for the
+        // same initial purchase (we observed this empirically). Dedupe by
+        // checking if a Pro grant landed for this user in the last 90s — if
+        // so, skip; the prior event already credited this period.
         if (type === 'subscription.active' || type === 'subscription.created' || type === 'subscription.renewed') {
-          const credits = PLAN_FEATURES[planId].aiCreditsPerPeriod
-          await grantCredits(userId, credits, `${planId}_${cycle}_grant`)
+          const recent = await db
+            .select({ id: messageLedger.id })
+            .from(messageLedger)
+            .where(
+              and(
+                eq(messageLedger.userId, userId),
+                sql`${messageLedger.reason} LIKE 'pro_%'`,
+                sql`${messageLedger.createdAt} > NOW() - INTERVAL '90 seconds'`,
+              ),
+            )
+            .limit(1)
+          if (recent.length === 0) {
+            const grant = parseInt(meta.messages_per_period ?? '0', 10) || PLAN_FEATURES.pro.messagesPerPeriod
+            await grantMessages(userId, grant, `pro_${type === 'subscription.renewed' ? 'renewal' : 'activation'}`)
+          } else {
+            console.info('[dodo-webhook] dedupe: skipping duplicate pro grant for user', userId, 'event type=', type)
+          }
         }
-        // Variant id stored in audit log via the billingEvents row above.
-        void variantId
         break
       }
 
@@ -280,7 +326,8 @@ export async function handleDodoWebhook(c: Context) {
       }
 
       case 'subscription.failed':
-      case 'subscription.past_due': {
+      case 'subscription.past_due':
+      case 'subscription.on_hold': {
         await db
           .update(subscriptions)
           .set({ status: 'past_due', updatedAt: new Date() })
@@ -288,46 +335,37 @@ export async function handleDodoWebhook(c: Context) {
         break
       }
 
-      // ── One-time payments (Limitless + topups) ─────────────────────
+      // ── One-time payments (topups) ─────────────────────────────────
       case 'payment.succeeded':
       case 'payment.completed': {
-        const paymentId = event.data?.payment_id ?? event.payment_id ?? null
-
         if (meta.kind === 'topup') {
-          const credits = parseInt(meta.credits ?? '0', 10)
-          if (credits > 0) {
-            await grantCredits(userId, credits, `topup_${meta.pack_id ?? 'unknown'}`)
+          const paymentId = event.data?.payment_id ?? event.payment_id ?? null
+          // Dedupe by Dodo `payment_id` — same payment can be redelivered.
+          if (paymentId) {
+            const dup = await db
+              .select({ id: messageLedger.id })
+              .from(messageLedger)
+              .where(
+                and(
+                  eq(messageLedger.userId, userId),
+                  sql`${messageLedger.meta}->>'payment_id' = ${paymentId}`,
+                ),
+              )
+              .limit(1)
+            if (dup.length > 0) {
+              console.info('[dodo-webhook] dedupe: topup payment already credited', paymentId)
+              break
+            }
           }
-          break
-        }
-
-        // Otherwise this is a one-time plan purchase (Limitless).
-        if (meta.plan_id === 'limitless') {
-          await db
-            .insert(subscriptions)
-            .values({
+          const messages = parseInt(meta.messages ?? '0', 10)
+          if (messages > 0) {
+            await grantMessages(
               userId,
-              plan: 'limitless',
-              status: 'active',
-              cycle: 'lifetime',
-              dodoPaymentId: paymentId,
-              currentPeriodEnd: null,
-              cancelAtPeriodEnd: false,
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: subscriptions.userId,
-              set: {
-                plan: 'limitless',
-                status: 'active',
-                cycle: 'lifetime',
-                dodoPaymentId: paymentId,
-                currentPeriodEnd: null,
-                cancelAtPeriodEnd: false,
-                updatedAt: new Date(),
-              },
-            })
-          await grantCredits(userId, PLAN_FEATURES.limitless.aiCreditsPerPeriod, 'limitless_lifetime_grant')
+              messages,
+              `topup_${meta.pack_id ?? 'unknown'}`,
+              { payment_id: paymentId },
+            )
+          }
         }
         break
       }

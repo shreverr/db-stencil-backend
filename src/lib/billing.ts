@@ -23,13 +23,13 @@ export async function ensureSubscription(userId: string) {
 /**
  * Resolves the user's effective plan, taking subscription status + period
  * end into account. A canceled / expired pro user falls back to free.
+ * Enterprise is provisioned manually; once set, it doesn't expire.
  */
 export async function getUserPlan(userId: string): Promise<PlanId> {
   const sub = await ensureSubscription(userId)
   if (sub.plan === 'free') return 'free'
   if (sub.status !== 'active') return 'free'
-  // Limitless is one-time — no period boundary check.
-  if (sub.plan === 'limitless') return 'limitless'
+  if (sub.plan === 'enterprise') return 'enterprise'
   // Pro must have a non-expired period.
   if (sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() < Date.now()) return 'free'
   return sub.plan
