@@ -45,6 +45,22 @@ const AGENTIC_RE =
 const ADVISORY_RE =
   /\b(thoughts|opinion|review|what (could|can|do|should|'?s|is)|any (issues|suggestions|missing)|how (would|should|could) you|is (this|it) (scalable|good|fine|ok))\b/
 
+// ── Scope guard: detect off-topic messages before they reach the LLM ──────
+// Any message containing a DB/schema keyword is always in scope.
+const DB_SCOPE_RE =
+  /\b(table|column|schema|database|\bdb\b|field|model|relat|foreign.?key|primary.?key|\bpk\b|\bfk\b|index|sql|data.?type|entity|join|constraint|uuid|integer|bigint|boolean|timestamp|jsonb|nullable|unique|erd|saas|crm|auth|api|backend|stencil|design|build|create|add|delete|remove|rename|refactor|audit|group|canvas|workspace)\b/i
+
+// Patterns that — when no DB keyword is present — signal a general-knowledge
+// question completely outside DBStencil's scope.
+const OFF_TOPIC_SIGNALS: RegExp[] = [
+  /^who (is|was|are|were)\b/i,          // "who is Justin Bieber"
+  /^tell me (about|who|what)\b/i,        // "tell me about X"
+  /^what (is|are|was|were) [a-z]/i,      // "what is quantum physics" (no DB word)
+  /^how (is|are|was|were) [a-z]/i,       // "how is the stock market"
+  /^explain [a-z]/i,                      // "explain evolution" (no DB word)
+  /\b(recipe|biography|weather (today|in|for)|capital of|population of|history of|how to cook|best (movie|song|restaurant|food|car|book)|who (won|invented|founded|discovered))\b/i,
+]
+
 export interface RequestContext {
   writer: SseWriter
   apiKey: string
@@ -84,6 +100,9 @@ export interface RequestContext {
 
   /** Refund hook called by closeStream when nonClarifyToolCalls === 0. */
   refundIfNeeded: () => Promise<void>
+
+  /** Set to true by classifyIntent when message is outside DBStencil scope. */
+  offTopic: boolean
 }
 
 type AccumulatedKeys =
@@ -95,6 +114,7 @@ type AccumulatedKeys =
   | "parallelDone" | "lintDone" | "narrationRetryUsed"
   | "round" | "working"
   | "lastRoundToolCount" | "lastRoundTextLen" | "lastRoundReasoningLen"
+  | "offTopic"
 
 export function createContext(init: Omit<RequestContext, AccumulatedKeys>): RequestContext {
   return {
@@ -118,6 +138,7 @@ export function createContext(init: Omit<RequestContext, AccumulatedKeys>): Requ
     lastRoundToolCount: 0,
     lastRoundTextLen: 0,
     lastRoundReasoningLen: 0,
+    offTopic: false,
   }
 }
 
@@ -219,9 +240,22 @@ async function ingestToolCalls(
 export function buildGraph(ctx: RequestContext) {
   // ── Nodes ──────────────────────────────────────────────────────────────
   const classifyIntent = async (_: State): Promise<Partial<State>> => {
-    const last = [...ctx.body.messages].reverse().find((m) => m.role === "user")?.content?.toLowerCase() ?? ""
+    const lastMsg = [...ctx.body.messages].reverse().find((m) => m.role === "user")?.content ?? ""
+    const last = lastMsg.toLowerCase()
     ctx.isAgentic = AGENTIC_RE.test(last) && !ADVISORY_RE.test(last)
     ctx.working = [{ role: "system", content: renderSystem(ctx) }, ...ctx.body.messages]
+
+    // Scope gate: if no DB keyword AND message matches an off-topic pattern,
+    // refuse immediately without calling the LLM.
+    if (!DB_SCOPE_RE.test(lastMsg) && OFF_TOPIC_SIGNALS.some((r) => r.test(lastMsg.trim()))) {
+      ctx.offTopic = true
+      ctx.finishReason = "stop"
+      await ctx.writer.write({
+        type: "text",
+        delta: "I can only help with database schema design in DBStencil.",
+      })
+    }
+
     return { _tick: 1 }
   }
 
@@ -478,7 +512,10 @@ export function buildGraph(ctx: RequestContext) {
     .addNode("lintRound", lintRound)
     .addNode("closeStream", closeStream)
     .addEdge(START, "classifyIntent")
-    .addEdge("classifyIntent", "mainRound")
+    .addConditionalEdges("classifyIntent", () => ctx.offTopic ? "closeStream" : "mainRound", {
+      mainRound: "mainRound",
+      closeStream: "closeStream",
+    })
     .addConditionalEdges("mainRound", mainRouter, {
       mainRound: "mainRound",
       fanoutColumns: "fanoutColumns",
