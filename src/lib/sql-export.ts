@@ -88,7 +88,7 @@ function foreignKeyDDL(tables: Table[], edge: Edge): string | null {
   const srcCol = srcTable?.columns.find((c) => c.id === edge.sourceColumn)
   const tgtCol = tgtTable?.columns.find((c) => c.id === edge.targetColumn)
   if (!srcTable || !tgtTable || !srcCol || !tgtCol) return null
-  const fkName = `fk_${srcTable.name}_${srcCol.name}`
+  const fkName = `fk_${srcTable.name}_${srcCol.name}_${tgtTable.name}`
   return (
     `ALTER TABLE ${quoteIdent(srcTable.name)}\n` +
     `  ADD CONSTRAINT ${quoteIdent(fkName)}\n` +
@@ -117,7 +117,14 @@ export function buildPostgresDDL(tables: Table[], edges: Edge[]): BuildDDLResult
       statements.push(indexDDL(table, idx).replace(/;$/, ''))
     }
   }
+  // Deduplicate edges by (sourceColumn, targetColumn) pair before generating
+  // FK constraints — prevents "constraint already exists" errors from duplicate
+  // relations emitted by the AI generation rounds.
+  const seenEdgePairs = new Set<string>()
   for (const edge of edges) {
+    const pairKey = `${edge.sourceColumn}:${edge.targetColumn}`
+    if (seenEdgePairs.has(pairKey)) continue
+    seenEdgePairs.add(pairKey)
     const fk = foreignKeyDDL(tables, edge)
     if (fk) statements.push(fk.replace(/;$/, ''))
   }
