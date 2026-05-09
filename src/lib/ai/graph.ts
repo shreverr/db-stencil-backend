@@ -226,8 +226,66 @@ async function ingestToolCalls(
   return { asked }
 }
 
+// Null writer — discards all events. Used for silent sub-agent calls
+// (e.g. prompt refinement) that must not stream anything to the client.
+const nullWriter: SseWriter = {
+  write: async () => {},
+  done: async () => {},
+  closed: () => false,
+}
+
 export function buildGraph(ctx: RequestContext) {
   // ── Nodes ──────────────────────────────────────────────────────────────
+
+  // ── refinePrompt — silent first pass that fixes typos/grammar in the
+  // last user message before any scope-checking or schema work begins.
+  // Makes a cheap LLM call through a null writer so nothing is streamed.
+  const refinePrompt = async (_: State): Promise<Partial<State>> => {
+    const msgs = ctx.body.messages
+    const lastUserIdx = msgs.reduce<number | undefined>((found, m, i) =>
+      m.role === "user" ? i : found, undefined)
+    if (lastUserIdx === undefined) return { _tick: 1 }
+
+    const raw = msgs[lastUserIdx].content
+    // Skip refinement for very short messages — they're already atomic
+    if (raw.trim().split(/\s+/).length <= 3) return { _tick: 1 }
+
+    try {
+      const result = await streamLLM({
+        apiKey: ctx.apiKey,
+        baseUrl: ctx.baseUrl,
+        model: ctx.model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a silent prompt cleaner. Fix typos, spelling errors, and grammar in the user message. " +
+              "Keep the EXACT intent — do not add, remove, or reinterpret any request. " +
+              "Do not expand scope or infer extra features. " +
+              "Return ONLY the corrected message. No explanation, no prefix, no quotes.",
+          },
+          { role: "user", content: raw },
+        ],
+        maxTokens: 256,
+        reasoningMaxTokens: 64,
+        signal: ctx.abortSignal,
+        suppressText: true,
+        writer: nullWriter,
+      })
+
+      const refined = result.assistantText.trim()
+      if (refined && refined !== raw) {
+        const updated = [...msgs]
+        updated[lastUserIdx] = { ...updated[lastUserIdx], content: refined }
+        ctx.body.messages = updated
+      }
+    } catch {
+      // Non-fatal — proceed with the original message
+    }
+
+    return { _tick: 1 }
+  }
+
   const classifyIntent = async (_: State): Promise<Partial<State>> => {
     const lastMsg = [...ctx.body.messages].reverse().find((m) => m.role === "user")?.content ?? ""
     const last = lastMsg.toLowerCase()
@@ -497,13 +555,15 @@ export function buildGraph(ctx: RequestContext) {
 
   // ── Wire it up ─────────────────────────────────────────────────────────
   return new StateGraph(StateAnnotation)
+    .addNode("refinePrompt", refinePrompt)
     .addNode("classifyIntent", classifyIntent)
     .addNode("mainRound", mainRound)
     .addNode("fanoutColumns", fanoutColumns)
     .addNode("groupingPass", groupingPass)
     .addNode("lintRound", lintRound)
     .addNode("closeStream", closeStream)
-    .addEdge(START, "classifyIntent")
+    .addEdge(START, "refinePrompt")
+    .addEdge("refinePrompt", "classifyIntent")
     .addConditionalEdges("classifyIntent", () => ctx.offTopic ? "closeStream" : "mainRound", {
       mainRound: "mainRound",
       closeStream: "closeStream",
