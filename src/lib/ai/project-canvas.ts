@@ -150,6 +150,12 @@ export function projectCanvas(
         const tgt = findTable(tables, tT); if (!tgt) break
         const sCol = findCol(src, sC); if (!sCol) break
         const tCol = findCol(tgt, tC); if (!tCol) break
+        // Skip duplicate — same source col → target col pair already exists
+        const alreadyExists = edges.some(
+          (e) => e.source === src.id && e.sourceColumn === sCol.id &&
+                 e.target === tgt.id && e.targetColumn === tCol.id,
+        )
+        if (alreadyExists) break
         edges.push({
           source: src.id,
           sourceColumn: sCol.id,
@@ -185,6 +191,8 @@ export function projectCanvas(
           const t = findTable(tables, tn)
           if (t) ids.push(t.id)
         }
+        // Never create a 1-table (or empty) group — auto-drop silently
+        if (ids.length < 2) break
         groups.push({ label, tableIds: ids })
         break
       }
