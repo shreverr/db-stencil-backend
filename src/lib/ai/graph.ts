@@ -436,14 +436,10 @@ export function buildGraph(ctx: RequestContext) {
     ctx.lintDone = true
     await ctx.writer.write({ type: "node_start", name: "lint" })
     const createdSet = new Set(ctx.createdTableNames.map((n) => n.toLowerCase()))
-    const failures = lintCanvas(projectCanvas(ctx.initialCanvas, ctx.dispatched), createdSet)
-    // Detect-only: emit failures for telemetry/debugging but do NOT run an
-    // auto-fix LLM pass. The fix loop caused cascading schema damage (the
-    // model would delete tables instead of patching column types). The
-    // frontend silently stores lint_failures and never renders them to users.
-    if (failures.length > 0) {
-      await ctx.writer.write({ type: "lint_failures", failures: failures.slice(0, 12) })
-    }
+    // Detect-only, silent: run the lint check for internal correctness tracking
+    // but do NOT forward results to the client SSE stream. Lint output was
+    // leaking into the chat UI as text narration; hiding it entirely is cleaner.
+    lintCanvas(projectCanvas(ctx.initialCanvas, ctx.dispatched), createdSet)
     return { _tick: 1 }
   }
 
