@@ -289,13 +289,17 @@ export function buildGraph(ctx: RequestContext) {
   const classifyIntent = async (_: State): Promise<Partial<State>> => {
     const lastMsg = [...ctx.body.messages].reverse().find((m) => m.role === "user")?.content ?? ""
     const last = lastMsg.toLowerCase()
-    ctx.isAgentic = AGENTIC_RE.test(last) && !ADVISORY_RE.test(last)
+    const wordCount = lastMsg.trim().split(/\s+/).length
+    // Short (≤6 word) non-advisory messages are AGENTIC: they're domain names
+    // ("restaurant management system"), option selections ("Single location"),
+    // or brief commands ("yes", "go ahead"). Without this, domain-name inputs
+    // get isAgentic=false → suppressText=false → AI narrates lint/debug text.
+    ctx.isAgentic = !ADVISORY_RE.test(last) && (AGENTIC_RE.test(last) || wordCount <= 6)
     ctx.working = [{ role: "system", content: renderSystem(ctx) }, ...ctx.body.messages]
 
     // Scope gate (allowlist): block anything that isn't clearly about DB/schema design.
     // A message is in-scope if it: contains a DB keyword, contains an action word,
     // OR is ≤ 6 words (short replies like "yes", "ok", option selections like "menus + orders + customers").
-    const wordCount = lastMsg.trim().split(/\s+/).length
     const inScope = DB_SCOPE_RE.test(lastMsg) || AGENTIC_RE.test(last) || wordCount <= 6
     if (!inScope) {
       ctx.offTopic = true
@@ -432,41 +436,13 @@ export function buildGraph(ctx: RequestContext) {
     ctx.lintDone = true
     await ctx.writer.write({ type: "node_start", name: "lint" })
     const createdSet = new Set(ctx.createdTableNames.map((n) => n.toLowerCase()))
-    const reproject = () => lintCanvas(projectCanvas(ctx.initialCanvas, ctx.dispatched), createdSet)
-
-    let failures = reproject()
-    if (failures.length === 0) return { _tick: 1 }
-
-    // Up to 2 fix passes. After each pass we re-project the canvas (the fix
-    // calls are now in ctx.dispatched) and re-lint. Two passes is enough in
-    // practice — if the model can't clear it in two tries, we surface what's
-    // left and let the user resolve.
-    for (let attempt = 0; attempt < 2 && failures.length > 0; attempt++) {
+    const failures = lintCanvas(projectCanvas(ctx.initialCanvas, ctx.dispatched), createdSet)
+    // Detect-only: emit failures for telemetry/debugging but do NOT run an
+    // auto-fix LLM pass. The fix loop caused cascading schema damage (the
+    // model would delete tables instead of patching column types). The
+    // frontend silently stores lint_failures and never renders them to users.
+    if (failures.length > 0) {
       await ctx.writer.write({ type: "lint_failures", failures: failures.slice(0, 12) })
-      const list = failures.slice(0, 12).map((f) => `- [${f.code}] ${f.message}`).join("\n")
-      const header = attempt === 0
-        ? `LINT FAILURES — fix these now via tool calls. Tool calls only, no text:`
-        : `LINT FAILURES (still failing after first fix) — fix what remains. Tool calls only, no text:`
-      const result = await streamLLM({
-        apiKey: ctx.apiKey,
-        baseUrl: ctx.baseUrl,
-        model: ctx.model,
-        messages: [
-          { role: "system", content: renderSystem(ctx) },
-          ...ctx.body.messages,
-          { role: "system", content: `${header}\n${list}` },
-        ],
-        tools: aiTools as unknown as unknown[],
-        toolChoice: "required",
-        maxTokens: 4096,
-        reasoningMaxTokens: 1024,
-        signal: ctx.abortSignal,
-        suppressText: true,
-        writer: ctx.writer,
-      })
-      if (result.toolCalls.length === 0) break
-      await ingestToolCalls(ctx, result.toolCalls.map((t) => ({ id: t.id, name: t.name, args: t.args })))
-      failures = reproject()
     }
     return { _tick: 1 }
   }
