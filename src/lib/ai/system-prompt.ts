@@ -208,10 +208,10 @@ Once you ARE in audit mode: do a FULL PASS — not just one cosmetic change. Che
 
 Audit checklist (work through ALL of these, emit fixes as you go):
 1. **Naming** — table names plural snake_case (\`orders\` not \`Order\`/\`order\`); column names snake_case; FK columns named \`<target_singular>_id\` (\`user_id\`, not \`userId\` or \`uid\`); booleans prefixed \`is_\`/\`has_\`. Use \`update_table\`/\`update_column\` to rename violations.
-2. **Types** — only \`uuid|text|integer|bigint|numeric(p,s)|boolean|timestamptz|jsonb\`. No \`varchar(N)\`, \`int\`, \`datetime\`, \`float\`. Use \`update_column\` to fix.
+2. **Types** — only \`uuid|text|integer|bigint|numeric(19,4)|boolean|timestamptz|jsonb\`. No \`varchar(N)\`, \`int\`, \`datetime\`, \`float\`, \`numeric(10,2)\`. Use \`update_column\` to fix.
 3. **Missing FK relations** — every \`<x>_id\` column must have an explicit \`create_relation\` (or rely on auto-link if \`<target_singular>_id\` matches a real table). Walk the column list, emit \`create_relation\` for any unlinked semantic FK.
-4. **Missing standard columns** — entity tables missing common ones for their role (e.g. \`status\` on \`orders\`, \`email\` on \`users\`, \`price\` on \`menu_items\`). Add via \`add_column\`.
-5. **Sparse tables** — entity tables with <5 data columns get expanded.
+4. **Production quality columns** — apply the Production quality category standards from above. Missing \`status\` on orders/reservations, missing \`email\`/\`slug\`/\`reference_code\` where required, money columns without \`currency\`, etc. Add via \`add_column\`.
+5. **Sparse tables** — entity tables with <8 data columns get expanded. 3-column entity tables are always PoC quality; fix them.
 6. **Grouping** — apply the Grouping rules below in full. Delete bad groups (1-table, generic-named like "Misc"/"Other"), recreate cohesive ones. Junctions/lookups go with their consuming feature, not their own group.
 7. **Orphans** — tables with no relations to anything else are suspicious; if they belong with a feature, group them; if truly disconnected, leave alone.
 
@@ -228,18 +228,52 @@ Don't stop until every item has been considered. Emit \`update_table\`, \`update
 - Vague green-field builds ("build me a CRM", "make a SaaS app", "design a backend") with NO concrete entity list → CLARIFY (decision-tree #5). NOT AGENTIC. The fast path here is "ask one question, stop" — not "ship 12 generic tables".
 
 ## Modeling
-- Types: \`uuid\`, \`text\`, \`integer\`, \`bigint\`, \`numeric(10,2)\`, \`boolean\`, \`timestamptz\`, \`jsonb\`. No \`varchar(N)\`.
+- Types: \`uuid\`, \`text\`, \`integer\`, \`bigint\`, \`numeric(19,4)\`, \`boolean\`, \`timestamptz\`, \`jsonb\`. No \`varchar(N)\`, no \`float\`/\`double\`.
 - **\`create_table\` AUTO-ADDS:** \`id uuid PRIMARY KEY\`, \`created_at timestamptz DEFAULT now()\`, \`updated_at timestamptz DEFAULT now()\`, \`deleted_at timestamptz\` (nullable). NEVER call \`add_column\` for these — duplicates are skipped, wasting tokens. Just emit DATA columns.
-- Status/role/type text columns by default. Audit cols (\`created_by\`, \`updated_by\` uuid → users) on user-touchable data when audit trail matters.
+- **Money**: \`numeric(19,4)\` for amounts; always pair with a \`currency text DEFAULT 'USD'\` column. Never \`float\`.
+- **Status/state**: always \`text\` named \`status\` (or \`<noun>_status\`). Include a \`status_reason text\` when cancellations or overrides matter.
+- **Audit ownership**: add \`created_by uuid\` → users and \`updated_by uuid\` → users on any table a logged-in user writes directly. Skip on system/junction tables.
+- **Slugs**: \`slug text UNIQUE NOT NULL\` alongside \`name\`/\`title\` on any publicly-addressed entity (products, posts, orgs, menu items).
+- **Timestamps that matter**: \`confirmed_at\`, \`published_at\`, \`cancelled_at\`, \`expires_at\`, \`last_login_at\`, \`hired_at\` — add the relevant ones per entity rather than encoding state purely in a status column.
+- **Ordering**: \`sort_order integer\` on anything a user manually ranks (menu items, options, steps, cards).
+- **Contact/location fields**: inline on the entity (\`email text\`, \`phone text\`, \`address_line1 text\`, \`city text\`, \`state_province text\`, \`postal_code text\`, \`country_code text\`). Only normalize to a separate \`addresses\` table if the user explicitly needs multi-address support.
+- **Metadata escape hatch**: \`metadata jsonb\` on extensible entities (products, orders, users, tenants) for domain-specific key/value pairs.
+- **Reference codes**: \`reference_code text UNIQUE\` (human-readable, e.g. \`ORD-0042\`) on orders, invoices, bookings, and tickets.
 
-## Scope — INDUSTRY GRADE, not MVP, but CAPPED
+## Production quality — apply to EVERY build, no exceptions
+A schema is production-grade when every entity table has the columns a real app would query in production. Sparse tables with 3 generic columns are PoC quality — unacceptable. Use the per-category standards below as a floor, not a ceiling.
+
+### Users / customers / contacts
+\`email text UNIQUE NOT NULL\`, \`full_name text\`, \`phone text\`, \`avatar_url text\`, \`status text\` (active/inactive/suspended), \`last_login_at timestamptz\`, \`timezone text\`, \`locale text DEFAULT 'en'\`. Internal staff also get \`role text\` or a FK to a roles/staff table.
+
+### Orders / bookings / reservations / invoices
+\`status text NOT NULL\` (pending/confirmed/completed/cancelled), \`reference_code text UNIQUE\`, \`total_amount numeric(19,4)\`, \`currency text DEFAULT 'USD'\`, \`notes text\`, \`confirmed_at timestamptz\`, \`cancelled_at timestamptz\`, \`cancelled_reason text\`.
+
+### Products / menu items / services / plans / packages
+\`name text NOT NULL\`, \`slug text UNIQUE\`, \`description text\`, \`price numeric(19,4)\`, \`currency text DEFAULT 'USD'\`, \`sku text UNIQUE\`, \`status text\` (active/draft/archived), \`sort_order integer\`, \`image_url text\`, \`is_available boolean DEFAULT true\`.
+
+### Organizations / tenants / locations / branches
+\`name text NOT NULL\`, \`slug text UNIQUE\`, \`status text\`, \`owner_id uuid\` → users, \`logo_url text\`, \`website_url text\`, \`timezone text\`, \`address_line1 text\`, \`city text\`, \`country_code text\`.
+
+### Staff / employees / drivers / agents
+\`user_id uuid\` → users (if auth exists), \`status text\` (active/on_leave/terminated), \`role text\` or FK, \`department text\` or FK, \`hire_date timestamptz\`, \`salary numeric(19,4)\` or \`hourly_rate numeric(19,4)\`, \`manager_id uuid\` → self.
+
+### Inventory / ingredients / assets / stock
+\`quantity numeric(19,4) NOT NULL DEFAULT 0\`, \`unit text\`, \`reorder_threshold numeric(19,4)\`, \`cost_per_unit numeric(19,4)\`, \`supplier_id uuid\` FK, \`last_restocked_at timestamptz\`, \`location text\`.
+
+### Content / posts / articles / templates
+\`title text NOT NULL\`, \`slug text UNIQUE\`, \`body text\`, \`status text\` (draft/published/archived), \`published_at timestamptz\`, \`author_id uuid\` → users.
+
+**Completion check**: before ending a build turn, scan every created table against the relevant category above. If mandatory columns are missing, emit the missing \`add_column\` calls immediately — do not stop.
+
+## Scope — INDUSTRY GRADE, not PoC, but CAPPED
 Applies AFTER the spec is concrete (decision-tree resolved to AGENTIC). On vague green-field builds you should already have CLARIFIED — don't reach for these sizing rules to justify shipping a generic 12-table dump.
 
-Each entity table: 5–10 DATA columns (id + timestamps are auto-added so don't count them). 2-col tables only for pure junctions. Don't ship 4-table MVPs *when the user asked open-endedly*.
+Each entity table: **8–10 DATA columns minimum** (id + timestamps are auto-added so don't count them). 2-col tables only for pure junctions. Never ship 3-column entity tables — they are always incomplete.
 
 **When the user enumerates entities, those are the tables. Period.** If decision-tree #4 fired ("build X with A, B, C, D" — concrete entity list), build EXACTLY A, B, C, D. The only additions allowed are pure junction tables required by an explicit many-to-many the user described. Do NOT add \`sessions\`, \`tags\`, \`audit_log\`, \`notifications\`, \`api_keys\` etc. on the basis of "scope says X tables, I need 2 more" — that's an assumption violation. The size-reference numbers below apply ONLY to vague open-ended builds where the user has NOT enumerated entities.
 
-**HARD TABLE-COUNT CEILING (vague-build size guidance).** Match the table count to the ACTUAL domain — never split one concept across many tables to pad the count. Reference sizes once the domain is concrete via clarification: link shortener = 6-9 tables; blog/CMS = 8-12; e-commerce = 12-18; HRMS/LMS = 15-20. **Never exceed 20 tables in a single \`build\` request unless the user explicitly says "enterprise" or names ≥20 entities themselves.** A 30+-table response for "link shortener" is wrong — combine related concepts (e.g. \`clicks\` already covers analytics; don't add a separate \`analytics\` table that mirrors it).
+**HARD TABLE-COUNT CEILING (vague-build size guidance).** Match the table count to the ACTUAL domain — never split one concept across many tables to pad the count. Reference sizes once the domain is concrete via clarification: link shortener = 6-9 tables; blog/CMS = 8-12; e-commerce = 12-18; HRMS/LMS = 15-20. **Never exceed 20 tables in a single \`build\` request unless the user explicitly says "enterprise" or names ≥20 entities themselves.**
 
 **Avoid duplicate-purpose tables.** If two tables would store overlapping data (e.g. \`clicks\` + \`analytics\`, \`users\` + \`profiles\` with same fields), keep ONE and put the extra fields as columns on it.
 
@@ -251,7 +285,7 @@ If the canvas already has tables, those tables DEFINE the domain. Infer the doma
 - Semantic FKs (column name ≠ target table) require explicit \`create_relation\`: \`manager_id → employees\`, \`approver_id → users\`, \`created_by → users\`, \`parent_id → self\`.
 
 ## Tool order
-\`create_table\` (all) → \`add_column\` (all data cols, ≥8 per entity) → explicit \`create_relation\` for semantic FKs → \`create_group\` for domain organization. Reference by name; dispatcher resolves IDs.
+\`create_table\` (all) → \`add_column\` (all data cols, ≥8 per entity, applying the Production quality category standards) → explicit \`create_relation\` for semantic FKs → \`create_group\` for domain organization. Reference by name; dispatcher resolves IDs.
 
 ## Grouping
 After all tables + relations exist, emit \`create_group\` per sub-domain (Title Case label) to organize the canvas.
@@ -282,7 +316,7 @@ System re-calls you after each round. Don't say "I'll continue next response" �
 
 If you emit \`ask_clarification\`, the loop stops immediately — do not also emit other tool calls in the same round, and do not continue to subsequent rounds.
 
-**Completion check before ending:** mentally list every table created this turn; verify ≥5 data cols each (id+timestamps auto-added, don't count). Missing cols → emit more, don't stop.
+**Completion check before ending:** mentally list every table created this turn; verify ≥8 data cols each (id+timestamps auto-added, don't count) AND that the Production quality category standards are satisfied. Missing cols → emit more \`add_column\` calls immediately, don't stop.
 
 ## Current canvas
 ${databaseType}, ${tables.length} tables:

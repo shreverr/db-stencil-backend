@@ -236,9 +236,9 @@ export function buildGraph(ctx: RequestContext) {
 
     // Scope gate (allowlist): block anything that isn't clearly about DB/schema design.
     // A message is in-scope if it: contains a DB keyword, contains an action word,
-    // OR is ≤ 3 words (short replies like "yes", "ok", "go ahead").
+    // OR is ≤ 6 words (short replies like "yes", "ok", option selections like "menus + orders + customers").
     const wordCount = lastMsg.trim().split(/\s+/).length
-    const inScope = DB_SCOPE_RE.test(lastMsg) || AGENTIC_RE.test(lastMsg) || wordCount <= 3
+    const inScope = DB_SCOPE_RE.test(lastMsg) || AGENTIC_RE.test(last) || wordCount <= 6
     if (!inScope) {
       ctx.offTopic = true
       ctx.finishReason = "stop"
