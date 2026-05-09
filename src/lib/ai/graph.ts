@@ -46,9 +46,9 @@ const ADVISORY_RE =
   /\b(thoughts|opinion|review|what (could|can|do|should|'?s|is)|any (issues|suggestions|missing)|how (would|should|could) you|is (this|it) (scalable|good|fine|ok))\b/
 
 // ── Scope guard: allowlist approach — only DB/schema messages reach the LLM ──
-// Matches any message that references a DB concept or schema-design term.
+// Matches any message that references a DB concept, schema-design term, or improvement intent.
 const DB_SCOPE_RE =
-  /\b(table|column|schema|database|\bdb\b|field|model|relat|foreign.?key|primary.?key|\bpk\b|\bfk\b|index|sql|data.?type|entity|join|constraint|uuid|integer|bigint|boolean|timestamp|jsonb|nullable|unique|erd|saas|crm|auth|api|backend|stencil|design|build|create|add|delete|remove|rename|refactor|audit|group|canvas|workspace)\b/i
+  /\b(table|column|schema|database|\bdb\b|field|model|relat|foreign.?key|primary.?key|\bpk\b|\bfk\b|index|sql|data.?type|entity|join|constraint|uuid|integer|bigint|boolean|timestamp|jsonb|nullable|unique|erd|saas|crm|auth|api|backend|stencil|design|build|create|add|delete|remove|rename|refactor|audit|group|canvas|workspace|scalable|scale|improve|optimize|enhance|better|upgrade|expand|normalize|denormalize|migrate|relation|structur)\b/i
 
 export interface RequestContext {
   writer: SseWriter
